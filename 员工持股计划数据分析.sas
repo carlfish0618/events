@@ -10,7 +10,11 @@
 (7) c_resource: 资金来源
 (8) s_resource: 股票来源
 (9) is_structure: 是否结构化
+(10) leverage: 杠杆比例(当is_structure=1时有效)
+(11) n_stock: 股数(万股)
+
 ********/
+
 
 /** 笔记本版本 **/
 /*%LET product_dir = F:\Research\GIT_BACKUP\events;*/
@@ -39,17 +43,17 @@ options validvarname=any; /* 支持中文变量名 */
 
 
 /*** step1: 读入原始数据(永久保存) **/
-%read_from_excel(excel_path=&input_dir.\员工持股计划数据.xlsx,  output_table=product.raw_data, sheet_name = Sheet1$);
+%read_from_excel(excel_path=&input_dir.\员工持股计划数据20150531.xlsx,  output_table=product.raw_data, sheet_name = raw_sample$);
 
 /** Step2: 调整到交易日 */
-%adjust_date_modify(busday_table=busday , raw_table=product.raw_data ,colname=report_date,  output_table=raw_data, is_forward = 1)
+%adjust_date_modify(busday_table=busday , raw_table=product.raw_data ,colname=report_date,  output_table=raw_data, is_forward = 1);
 DATA raw_data;
 	SET raw_data;
 	event_id = _N_;
 RUN;
 
 /** 统计：周末发布的样本数 */
-/** 21的样本在周末发布消息。97个在交易日发布消息 */
+/** 31的样本在周末发布消息。133个在交易日发布消息 */
 PROC SQL;
 	CREATE TABLE stat AS
 	SELECT report_date_is_busday, count(1) AS nobs
@@ -71,6 +75,25 @@ RUN;
 
 /** Step4: 过滤部分事件 */
 %filter_event(event_table, stock_info_table, market_table, event_table2, ndays = 365, halt_days = 1, is_filter_mark = 1);
+DATA stat;
+	SET event_table2;
+	IF filter > 0;
+RUN;
+PROC SORT DATA = stat;
+	BY filter halt_days;
+RUN;
+/** 与raw_data进行连接，查看停牌的是否大多为定增的事件 */
+PROC SQL;
+	CREATE TABLE stat AS
+	SELECT A.*, B.filter, B.halt_days
+	FROM raw_data A LEFT JOIN
+	(SELECT * FROM event_table2) B
+	ON A.event_id = B.event_id
+	ORDER BY filter desc, s_resource;
+QUIT;
+
+
+
 
 /* 筛选出被过滤的事件 */
 /** 300376：上市时间未满1年 */
@@ -543,3 +566,8 @@ QUIT;
 
 %gen_no_overlapped_win(eventName=subset, event_table=subset, stock_hqinfo_table=stock_hqinfo_subset, 
 		bm_hqinfo_table=index_hqinfo_subset, start_win=1, end_win=35);
+
+
+PROC TRANSPOSE DATA = indus_index OUT = indus_index2(rename = (_NAME_=o_code));
+	BY date;
+RUN;
